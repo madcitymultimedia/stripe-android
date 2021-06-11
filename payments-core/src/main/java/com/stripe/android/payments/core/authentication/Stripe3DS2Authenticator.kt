@@ -1,7 +1,14 @@
 package com.stripe.android.payments.core.authentication
 
-import android.content.Context
+import androidx.annotation.ColorInt
 import androidx.annotation.VisibleForTesting
+import androidx.core.graphics.toColorInt
+import androidx.fragment.app.DialogFragment
+import androidx.fragment.app.Fragment
+import androidx.fragment.app.FragmentActivity
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleObserver
+import androidx.lifecycle.OnLifecycleEvent
 import com.stripe.android.PaymentAuthConfig
 import com.stripe.android.PaymentRelayStarter
 import com.stripe.android.StripePaymentController
@@ -15,18 +22,14 @@ import com.stripe.android.networking.AnalyticsRequestExecutor
 import com.stripe.android.networking.AnalyticsRequestFactory
 import com.stripe.android.networking.ApiRequest
 import com.stripe.android.networking.StripeRepository
-import com.stripe.android.payments.DefaultStripeChallengeStatusReceiver
-import com.stripe.android.payments.Stripe3ds2CompletionStarter
-import com.stripe.android.stripe3ds2.init.ui.StripeUiCustomization
 import com.stripe.android.stripe3ds2.service.StripeThreeDs2Service
 import com.stripe.android.stripe3ds2.transaction.ChallengeParameters
+import com.stripe.android.stripe3ds2.transaction.IntentData
 import com.stripe.android.stripe3ds2.transaction.MessageVersionRegistry
 import com.stripe.android.stripe3ds2.transaction.SdkTransactionId
-import com.stripe.android.stripe3ds2.transaction.Stripe3ds2ActivityStarterHost
 import com.stripe.android.stripe3ds2.transaction.Transaction
-import com.stripe.android.stripe3ds2.views.ChallengeProgressActivity
+import com.stripe.android.stripe3ds2.views.ChallengeProgressDialogFragment
 import com.stripe.android.view.AuthActivityStarterHost
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 import java.security.cert.CertificateException
 import kotlin.coroutines.CoroutineContext
@@ -41,16 +44,12 @@ internal class Stripe3DS2Authenticator(
     private val paymentRelayStarterFactory: (AuthActivityStarterHost) -> PaymentRelayStarter,
     private val analyticsRequestExecutor: AnalyticsRequestExecutor,
     private val analyticsRequestFactory: AnalyticsRequestFactory,
-    private val stripe3ds2CompletionStarterFactory: (AuthActivityStarterHost, Int) -> Stripe3ds2CompletionStarter,
     private val workContext: CoroutineContext,
     private val uiContext: CoroutineContext,
     private val threeDs2Service: StripeThreeDs2Service,
     private val messageVersionRegistry: MessageVersionRegistry,
     private val challengeProgressActivityStarter: ChallengeProgressActivityStarter
 ) : IntentAuthenticator {
-    init {
-        threeDs2Service.initialize(config.stripe3ds2Config.uiCustomization.uiCustomization)
-    }
 
     override suspend fun authenticate(
         host: AuthActivityStarterHost,
@@ -111,38 +110,32 @@ internal class Stripe3DS2Authenticator(
         stripe3ds2Fingerprint: Stripe3ds2Fingerprint,
         requestOptions: ApiRequest.Options
     ) {
+        val stripe3ds2Config = config.stripe3ds2Config
         val transaction = threeDs2Service.createTransaction(
             stripe3ds2Fingerprint.directoryServerEncryption.directoryServerId,
-            messageVersionRegistry.current, stripeIntent.isLiveMode,
+            messageVersionRegistry.current,
+            stripeIntent.isLiveMode,
             stripe3ds2Fingerprint.directoryServerName,
             stripe3ds2Fingerprint.directoryServerEncryption.rootCerts,
             stripe3ds2Fingerprint.directoryServerEncryption.directoryServerPublicKey,
-            stripe3ds2Fingerprint.directoryServerEncryption.keyId
+            stripe3ds2Fingerprint.directoryServerEncryption.keyId,
+            stripe3ds2Config.uiCustomization.uiCustomization
         )
-
-        when (host) {
-            is AuthActivityStarterHost.ActivityHost -> {
-                challengeProgressActivityStarter.start(
-                    host.activity,
-                    stripe3ds2Fingerprint.directoryServerName,
-                    false,
-                    config.stripe3ds2Config.uiCustomization.uiCustomization,
-                    transaction.sdkTransactionId
-                )
-            }
-            is AuthActivityStarterHost.FragmentHost -> {
-                challengeProgressActivityStarter.start(
-                    host.fragment.requireActivity(),
-                    stripe3ds2Fingerprint.directoryServerName,
-                    false,
-                    config.stripe3ds2Config.uiCustomization.uiCustomization,
-                    transaction.sdkTransactionId
-                )
-            }
-        }
 
         val paymentRelayStarter = paymentRelayStarterFactory(host)
         val timeout = config.stripe3ds2Config.timeout
+        val accentColor =
+            stripe3ds2Config.uiCustomization.uiCustomization.accentColor?.let { accentColor ->
+                runCatching { accentColor.toColorInt() }.getOrNull()
+            }
+
+        showLoadingScreen(
+            host,
+            stripe3ds2Fingerprint,
+            transaction,
+            accentColor
+        )
+
         runCatching {
             perform3ds2AuthenticationRequest(
                 transaction,
@@ -161,7 +154,7 @@ internal class Stripe3DS2Authenticator(
                     StripePaymentController.getRequestCode(stripeIntent),
                     host,
                     stripeIntent,
-                    requestOptions
+                    requestOptions,
                 )
             },
             onFailure = { throwable ->
@@ -172,6 +165,46 @@ internal class Stripe3DS2Authenticator(
                 )
             }
         )
+    }
+
+    private fun showLoadingScreen(
+        host: AuthActivityStarterHost,
+        stripe3ds2Fingerprint: Stripe3ds2Fingerprint,
+        transaction: Transaction,
+        @ColorInt accentColor: Int?
+    ) {
+        when (host) {
+            is AuthActivityStarterHost.ActivityHost -> {
+                when (val activity = host.activity) {
+                    is FragmentActivity -> {
+                        challengeProgressActivityStarter.start(
+                            activity,
+                            stripe3ds2Fingerprint.directoryServerName,
+                            accentColor,
+                            transaction.sdkTransactionId
+                        )
+                    }
+                    else -> null
+                }
+            }
+            is AuthActivityStarterHost.FragmentHost -> {
+                challengeProgressActivityStarter.start(
+                    host.fragment.requireActivity(),
+                    stripe3ds2Fingerprint.directoryServerName,
+                    accentColor,
+                    transaction.sdkTransactionId
+                )
+            }
+        }?.let { dialogFragment ->
+            host.lifecycle.addObserver(
+                object : LifecycleObserver {
+                    @OnLifecycleEvent(Lifecycle.Event.ON_STOP)
+                    fun onStop() {
+                        dialogFragment.dismiss()
+                    }
+                }
+            )
+        }
     }
 
     /**
@@ -324,70 +357,88 @@ internal class Stripe3DS2Authenticator(
         stripeIntent: StripeIntent,
         requestOptions: ApiRequest.Options
     ) = withContext(workContext) {
-        when (host) {
+        val intent = when (host) {
             is AuthActivityStarterHost.ActivityHost -> {
-                Stripe3ds2ActivityStarterHost(host.activity)
+                host.activity
             }
             is AuthActivityStarterHost.FragmentHost -> {
-                Stripe3ds2ActivityStarterHost(host.fragment)
+                host.fragment.requireActivity()
             }
-        }.let { stripe3ds2Host ->
-            delay(StripePaymentController.CHALLENGE_DELAY)
-
-            transaction.doChallenge(
-                stripe3ds2Host,
+        }.let {
+            transaction.createIntent(
+                it,
                 ChallengeParameters(
                     acsSignedContent = ares.acsSignedContent,
                     threeDsServerTransactionId = ares.threeDSServerTransId,
                     acsTransactionId = ares.acsTransId
                 ),
-                DefaultStripeChallengeStatusReceiver(
-                    stripe3ds2CompletionStarterFactory(
-                        host,
-                        StripePaymentController.getRequestCode(stripeIntent)
-                    ),
-                    stripeRepository,
-                    stripeIntent,
+                maxTimeout,
+                IntentData(
+                    stripeIntent.clientSecret.orEmpty(),
                     sourceId,
-                    requestOptions,
-                    analyticsRequestExecutor,
-                    analyticsRequestFactory,
-                    transaction,
-                    {
-                        transaction.close()
-                    },
-                    workContext = workContext
-                ),
-                maxTimeout
+                    requestOptions.apiKey,
+                    requestOptions.stripeAccount
+                )
             )
+        }
+
+        when (host) {
+            is AuthActivityStarterHost.ActivityHost -> {
+                host.activity.startActivityForResult(intent, REQUEST_CODE)
+            }
+            is AuthActivityStarterHost.FragmentHost -> {
+                host.fragment.startActivityForResult(intent, REQUEST_CODE)
+            }
         }
     }
 
-    internal fun interface ChallengeProgressActivityStarter {
+    internal interface ChallengeProgressActivityStarter {
         fun start(
-            context: Context,
+            activity: FragmentActivity,
             directoryServerName: String,
-            cancelable: Boolean,
-            uiCustomization: StripeUiCustomization,
+            accentColor: Int?,
             sdkTransactionId: SdkTransactionId
-        )
+        ): DialogFragment
+
+        fun start(
+            fragment: Fragment,
+            directoryServerName: String,
+            accentColor: Int?,
+            sdkTransactionId: SdkTransactionId
+        ): DialogFragment
     }
 
     internal class DefaultChallengeProgressActivityStarter : ChallengeProgressActivityStarter {
         override fun start(
-            context: Context,
+            activity: FragmentActivity,
             directoryServerName: String,
-            cancelable: Boolean,
-            uiCustomization: StripeUiCustomization,
+            accentColor: Int?,
             sdkTransactionId: SdkTransactionId
-        ) {
-            ChallengeProgressActivity.show(
-                context,
+        ): DialogFragment {
+            return ChallengeProgressDialogFragment.show(
+                activity.supportFragmentManager,
                 directoryServerName,
-                cancelable,
-                uiCustomization,
+                accentColor,
                 sdkTransactionId
             )
         }
+
+        override fun start(
+            fragment: Fragment,
+            directoryServerName: String,
+            accentColor: Int?,
+            sdkTransactionId: SdkTransactionId
+        ): DialogFragment {
+            return ChallengeProgressDialogFragment.show(
+                fragment.childFragmentManager,
+                directoryServerName,
+                accentColor,
+                sdkTransactionId
+            )
+        }
+    }
+
+    internal companion object {
+        val REQUEST_CODE = 80000
     }
 }

@@ -41,6 +41,8 @@ import com.stripe.android.model.WeChatPayNextAction
 import com.stripe.android.networking.ApiRequest
 import com.stripe.android.networking.StripeApiRepository
 import com.stripe.android.networking.StripeRepository
+import com.stripe.android.payments.core.authentication.Stripe3DS2Authenticator
+import com.stripe.android.stripe3ds2.transaction.ChallengeResult
 import com.stripe.android.view.AuthActivityStarterHost
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -388,6 +390,12 @@ class Stripe internal constructor(
                 paymentController.getPaymentIntentResult(data)
             }
             true
+        } else if (requestCode == Stripe3DS2Authenticator.REQUEST_CODE) {
+            val challengeResult = ChallengeResult.fromIntent(data)
+            executeAsync(callback) {
+                paymentController.getPaymentIntentResultFor3ds2(challengeResult)
+            }
+            false
         } else {
             false
         }
@@ -670,6 +678,12 @@ class Stripe internal constructor(
                 paymentController.getSetupIntentResult(data)
             }
             true
+        } else if (requestCode == Stripe3DS2Authenticator.REQUEST_CODE) {
+            val challengeResult = ChallengeResult.fromIntent(data)
+            executeAsync(callback) {
+                paymentController.getSetupIntentResultFor3ds2(challengeResult)
+            }
+            false
         } else {
             false
         }

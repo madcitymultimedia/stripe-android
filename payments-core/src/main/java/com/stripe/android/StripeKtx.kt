@@ -29,6 +29,8 @@ import com.stripe.android.model.StripeModel
 import com.stripe.android.model.Token
 import com.stripe.android.model.WeChatPayNextAction
 import com.stripe.android.networking.ApiRequest
+import com.stripe.android.payments.core.authentication.Stripe3DS2Authenticator
+import com.stripe.android.stripe3ds2.transaction.ChallengeResult
 
 /**
  * Confirm and authenticate a [PaymentIntent] using the Alipay SDK
@@ -710,7 +712,15 @@ suspend fun Stripe.getPaymentIntentResult(
             requestCode,
             data
         )
-    ) { paymentController.getPaymentIntentResult(data) }
+    ) {
+        if (requestCode == Stripe3DS2Authenticator.REQUEST_CODE) {
+            paymentController.getPaymentIntentResultFor3ds2(
+                ChallengeResult.fromIntent(data)
+            )
+        } else {
+            paymentController.getPaymentIntentResult(data)
+        }
+    }
 }
 
 /**
@@ -742,7 +752,15 @@ suspend fun Stripe.getSetupIntentResult(
             requestCode,
             data
         )
-    ) { paymentController.getSetupIntentResult(data) }
+    ) {
+        if (requestCode == Stripe3DS2Authenticator.REQUEST_CODE) {
+            paymentController.getSetupIntentResultFor3ds2(
+                ChallengeResult.fromIntent(data)
+            )
+        } else {
+            paymentController.getSetupIntentResult(data)
+        }
+    }
 }
 
 /**

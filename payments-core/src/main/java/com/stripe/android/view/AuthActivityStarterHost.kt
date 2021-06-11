@@ -4,6 +4,9 @@ import android.content.Intent
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.fragment.app.Fragment
+import androidx.lifecycle.Lifecycle
+import com.stripe.android.view.AuthActivityStarterHost.ActivityHost
+import com.stripe.android.view.AuthActivityStarterHost.FragmentHost
 
 /**
  * A representation of an Android component (i.e. [ComponentActivity] or [Fragment]) that can start
@@ -18,11 +21,14 @@ internal sealed class AuthActivityStarterHost {
     )
 
     abstract val statusBarColor: Int?
+    abstract val lifecycle: Lifecycle
 
     class ActivityHost(
         val activity: ComponentActivity,
         override val statusBarColor: Int?
     ) : AuthActivityStarterHost() {
+        override val lifecycle: Lifecycle
+            get() = activity.lifecycle
 
         @Suppress("DEPRECATION")
         override fun startActivityForResult(
@@ -40,6 +46,8 @@ internal sealed class AuthActivityStarterHost {
         val fragment: Fragment,
         override val statusBarColor: Int?
     ) : AuthActivityStarterHost() {
+        override val lifecycle: Lifecycle
+            get() = fragment.viewLifecycleOwner.lifecycle
 
         @Suppress("DEPRECATION")
         override fun startActivityForResult(

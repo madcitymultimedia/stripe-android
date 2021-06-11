@@ -9,6 +9,7 @@ buildscript {
         mavenCentral()
         google()
         gradlePluginPortal()
+        mavenLocal()
     }
 
     dependencies {
@@ -30,6 +31,7 @@ allprojects {
         mavenCentral()
         google()
         gradlePluginPortal()
+        mavenLocal()
     }
 
     task checkstyle(type: Checkstyle) {

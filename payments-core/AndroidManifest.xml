@@ -44,10 +44,6 @@
         </activity>
 
         <activity
-            android:name=".view.Stripe3ds2CompletionActivity"
-            android:theme="@style/StripeDefaultTheme" />
-
-        <activity
             android:name=".paymentsheet.PaymentSheetActivity"
             android:theme="@style/StripePaymentSheetDefaultTheme" />
         <activity

@@ -1,7 +1,7 @@
 package com.stripe.android.payments.core.authentication
 
 import android.content.Context
-import androidx.activity.ComponentActivity
+import androidx.fragment.app.FragmentActivity
 import androidx.test.core.app.ApplicationProvider
 import com.google.common.truth.Truth.assertThat
 import com.stripe.android.ApiKeyFixtures
@@ -40,6 +40,7 @@ import org.mockito.kotlin.any
 import org.mockito.kotlin.anyOrNull
 import org.mockito.kotlin.argumentCaptor
 import org.mockito.kotlin.eq
+import org.mockito.kotlin.isNull
 import org.mockito.kotlin.mock
 import org.mockito.kotlin.never
 import org.mockito.kotlin.verify
@@ -50,7 +51,7 @@ import org.robolectric.RobolectricTestRunner
 @ExperimentalCoroutinesApi
 class Stripe3DS2AuthenticatorTest {
     private val testDispatcher = TestCoroutineDispatcher()
-    private val activity: ComponentActivity = mock()
+    private val activity: FragmentActivity = mock()
     private val host = AuthActivityStarterHost.create(activity)
     private val sdkTransactionId = SdkTransactionId.create()
     private val stripeRepository = mock<StripeRepository>()
@@ -296,8 +297,7 @@ class Stripe3DS2AuthenticatorTest {
             verify(challengeProgressActivityStarter).start(
                 eq(activity),
                 eq("mastercard"),
-                eq(false),
-                any(),
+                isNull(),
                 eq(sdkTransactionId)
             )
 
@@ -346,8 +346,7 @@ class Stripe3DS2AuthenticatorTest {
             verify(challengeProgressActivityStarter).start(
                 eq(activity),
                 eq("american_express"),
-                eq(false),
-                any(),
+                isNull(),
                 eq(sdkTransactionId)
             )
         }

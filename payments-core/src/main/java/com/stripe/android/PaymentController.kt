@@ -19,6 +19,7 @@ import com.stripe.android.model.WeChat
 import com.stripe.android.model.WeChatPayNextAction
 import com.stripe.android.networking.ApiRequest
 import com.stripe.android.payments.PaymentFlowResult
+import com.stripe.android.stripe3ds2.transaction.ChallengeResult
 import com.stripe.android.view.AuthActivityStarterHost
 
 internal interface PaymentController {
@@ -135,6 +136,8 @@ internal interface PaymentController {
     )
     suspend fun getPaymentIntentResult(data: Intent): PaymentIntentResult
 
+    suspend fun getPaymentIntentResultFor3ds2(challengeResult: ChallengeResult): PaymentIntentResult
+
     /**
      * Get the SetupIntent's client_secret from [data] and use to retrieve
      * the SetupIntent object with updated status.
@@ -156,6 +159,8 @@ internal interface PaymentController {
         IllegalArgumentException::class
     )
     suspend fun getSetupIntentResult(data: Intent): SetupIntentResult
+
+    suspend fun getSetupIntentResultFor3ds2(challengeResult: ChallengeResult): SetupIntentResult
 
     /**
      * Get the Source's client_secret from [data] and use to retrieve

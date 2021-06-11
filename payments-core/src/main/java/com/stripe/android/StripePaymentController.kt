@@ -30,14 +30,16 @@ import com.stripe.android.networking.StripeRepository
 import com.stripe.android.payments.BrowserCapabilities
 import com.stripe.android.payments.BrowserCapabilitiesSupplier
 import com.stripe.android.payments.DefaultReturnUrl
+import com.stripe.android.payments.DefaultStripe3ds2CompletionRepository
 import com.stripe.android.payments.PaymentFlowFailureMessageFactory
 import com.stripe.android.payments.PaymentFlowResult
 import com.stripe.android.payments.PaymentIntentFlowResultProcessor
 import com.stripe.android.payments.SetupIntentFlowResultProcessor
-import com.stripe.android.payments.Stripe3ds2CompletionContract
-import com.stripe.android.payments.Stripe3ds2CompletionStarter
+import com.stripe.android.payments.Stripe3ds2CompletionRepository
 import com.stripe.android.payments.core.authentication.DefaultIntentAuthenticatorRegistry
 import com.stripe.android.payments.core.authentication.IntentAuthenticatorRegistry
+import com.stripe.android.payments.core.authentication.Stripe3DS2Authenticator
+import com.stripe.android.stripe3ds2.transaction.ChallengeResult
 import com.stripe.android.view.AuthActivityStarterHost
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -60,6 +62,12 @@ internal class StripePaymentController internal constructor(
     private val analyticsRequestFactory: AnalyticsRequestFactory =
         AnalyticsRequestFactory(context.applicationContext, publishableKeyProvider),
     private val alipayRepository: AlipayRepository = DefaultAlipayRepository(stripeRepository),
+    private val stripe3ds2CompletionRepository: Stripe3ds2CompletionRepository = DefaultStripe3ds2CompletionRepository(
+        stripeRepository,
+        analyticsRequestExecutor,
+        analyticsRequestFactory,
+        enableLogging = enableLogging
+    ),
     workContext: CoroutineContext = Dispatchers.IO,
     private val uiContext: CoroutineContext = Dispatchers.Main
 ) : PaymentController {
@@ -113,26 +121,12 @@ internal class StripePaymentController internal constructor(
         )
     }
 
-    /**
-     * [stripe3ds2ChallengeLauncher] is mutable and might be updated during
-     * through [registerLaunchersWithActivityResultCaller]
-     */
-    private var stripe3ds2ChallengeLauncher: ActivityResultLauncher<PaymentFlowResult.Unvalidated>? =
-        null
-    private val stripe3ds2CompletionStarterFactory =
-        { host: AuthActivityStarterHost, requestCode: Int ->
-            stripe3ds2ChallengeLauncher?.let {
-                Stripe3ds2CompletionStarter.Modern(it)
-            } ?: Stripe3ds2CompletionStarter.Legacy(host, requestCode)
-        }
-
     private val authenticatorRegistry: IntentAuthenticatorRegistry =
         DefaultIntentAuthenticatorRegistry.createInstance(
             context,
             stripeRepository,
             paymentRelayStarterFactory,
             paymentBrowserAuthStarterFactory,
-            stripe3ds2CompletionStarterFactory,
             analyticsRequestExecutor,
             analyticsRequestFactory,
             enableLogging,
@@ -152,19 +146,13 @@ internal class StripePaymentController internal constructor(
             PaymentBrowserAuthContract(defaultReturnUrl),
             activityResultCallback
         )
-        stripe3ds2ChallengeLauncher = activityResultCaller.registerForActivityResult(
-            Stripe3ds2CompletionContract(),
-            activityResultCallback
-        )
     }
 
     override fun unregisterLaunchers() {
         paymentRelayLauncher?.unregister()
         paymentBrowserAuthLauncher?.unregister()
-        stripe3ds2ChallengeLauncher?.unregister()
         paymentRelayLauncher = null
         paymentBrowserAuthLauncher = null
-        stripe3ds2ChallengeLauncher = null
     }
 
     /**
@@ -407,14 +395,14 @@ internal class StripePaymentController internal constructor(
      * Decide whether [getPaymentIntentResult] should be called.
      */
     override fun shouldHandlePaymentResult(requestCode: Int, data: Intent?): Boolean {
-        return requestCode == PAYMENT_REQUEST_CODE && data != null
+        return (requestCode == PAYMENT_REQUEST_CODE || requestCode == Stripe3DS2Authenticator.REQUEST_CODE) && data != null
     }
 
     /**
      * Decide whether [getSetupIntentResult] should be called.
      */
     override fun shouldHandleSetupResult(requestCode: Int, data: Intent?): Boolean {
-        return requestCode == SETUP_REQUEST_CODE && data != null
+        return (requestCode == SETUP_REQUEST_CODE || requestCode == Stripe3DS2Authenticator.REQUEST_CODE) && data != null
     }
 
     override fun shouldHandleSourceResult(requestCode: Int, data: Intent?): Boolean {
@@ -446,6 +434,14 @@ internal class StripePaymentController internal constructor(
             PaymentFlowResult.Unvalidated.fromIntent(data)
         )
 
+    override suspend fun getPaymentIntentResultFor3ds2(
+        challengeResult: ChallengeResult
+    ): PaymentIntentResult {
+        return paymentIntentFlowResultProcessor.processResult(
+            stripe3ds2CompletionRepository.complete(challengeResult)
+        )
+    }
+
     /**
      * Get the SetupIntent's client_secret from {@param data} and use to retrieve
      * the PaymentIntent object with updated status.
@@ -470,6 +466,14 @@ internal class StripePaymentController internal constructor(
         setupIntentFlowResultProcessor.processResult(
             PaymentFlowResult.Unvalidated.fromIntent(data)
         )
+
+    override suspend fun getSetupIntentResultFor3ds2(
+        challengeResult: ChallengeResult
+    ): SetupIntentResult {
+        return setupIntentFlowResultProcessor.processResult(
+            stripe3ds2CompletionRepository.complete(challengeResult)
+        )
+    }
 
     /**
      * Get the Source's client_secret from {@param data} and use to retrieve
